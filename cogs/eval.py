@@ -41,7 +41,7 @@ class Evaluator:
 
     def print(self, *args, sep=" ", end="\n", file=None, flush=None):
         with open(self.filename, "a") as f:
-            f.write(sep.join(args) + end)
+            f.write(sep.join(map(str, args)) + end)
             f.flush()
 
     class Transformer(ast.NodeTransformer):
