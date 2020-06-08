@@ -38,7 +38,6 @@ class Evaluator:
 
         import tempfile
         self.filename = tempfile.NamedTemporaryFile().name
-        print("start", self.filename)
 
     def print(self, *args, sep=" ", end="\n", file=None, flush=None):
         with open(self.filename, "a") as f:
@@ -55,6 +54,11 @@ class Evaluator:
         def visit_ImportFrom(self, node):
             if node.module not in Evaluator.allowed_imports:
                 raise EvalError("unsuported import")
+            for name in node.names:
+                if re.match("__([^_]+)__", name):
+                    raise EvalError("unsuported __name__ import")
+                if re.match("_([^_]+)", name):
+                    raise EvalError("unsuported _name import")
             return node
 
         def visit_Attribute(self, node):
