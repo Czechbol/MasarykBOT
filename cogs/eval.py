@@ -54,11 +54,12 @@ class Evaluator:
         def visit_ImportFrom(self, node):
             if node.module not in Evaluator.allowed_imports:
                 raise EvalError("unsuported import")
-            for name in node.names:
-                if re.match("__([^_]+)__", name):
-                    raise EvalError("unsuported __name__ import")
-                if re.match("_([^_]+)", name):
-                    raise EvalError("unsuported _name import")
+            for alias in node.names:
+                for name in [alias.name, alias.asname]:
+                    if re.match("__([^_]+)__", name):
+                        raise EvalError("unsuported __name__ import")
+                    if re.match("_([^_]+)", name):
+                        raise EvalError("unsuported _name import")
             return node
 
         def visit_Attribute(self, node):
