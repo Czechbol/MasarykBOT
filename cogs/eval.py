@@ -248,8 +248,8 @@ class Eval(commands.Cog):
         return f'```py\n{e.text}{"^":>{e.offset}}\n{e.__class__.__name__}: {e}```'
 
     def is_evaluatable_message(self, body):
-        return (body.startswith("```py") and
-                body.endswith("```") and
+        return ((body.startswith("```py\n") or body.startswith("```python\n")) and
+                body.endswith("\n```") and
                 body.count("\n") >= 2 and
                 len(self.cleanup_code(body)) > 0)
 
