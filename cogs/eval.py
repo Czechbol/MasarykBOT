@@ -51,7 +51,6 @@ class Evaluator:
     class Transformer(ast.NodeTransformer):
         def __init__(self, evaluator):
             self.evaluator = evaluator
-            print(type(self.evaluator), self.evaluator)
 
         def check_illegal(self, text):
             if re.match("__([^_]+)__", text):
@@ -75,6 +74,7 @@ class Evaluator:
             return node
 
         def visit_Attribute(self, node):
+            self.visit(node.value)
             self.check_illegal(node.attr)
             return node
 
@@ -87,18 +87,24 @@ class Evaluator:
             return node
 
         def visit_Index(self, node):
+            self.visit(node.name)
             try:
                 (retval, printval) = self.evaluator._eval(ast.Expression(node.value))
                 self.check_illegal(retval)
+            except EvalError as e:
+                raise e
             except Exception:
                 pass
             return node
 
         def visit_Call(self, node):
-            for arg in node.args:
+            self.visit(node.func)
+            for arg in node.args + node.keywords:
                 try:
                     (retval, printval) = self.evaluator._eval(ast.Expression(arg))
                     self.check_illegal(retval)
+                except EvalError as e:
+                    raise e
                 except Exception:
                     pass
             return node
@@ -177,62 +183,55 @@ class Eval(commands.Cog):
         remove play reaction so the code can't be executed
         again
         """
+        async def show_error(msg):
+            embed = Embed()
+            embed.color = Color.red()
+            embed.add_field(
+                name="Error",
+                value=f'```\n{msg}\n```')
+            embed.set_footer(icon_url=ctx.author.avatar_url)
+            return await ctx.send(embed=embed)
+
+        async def show_success(msg):
+            embed = Embed()
+            embed.color = Color(0xffffcc)
+            embed.add_field(
+                name="Output",
+                value=f'```\n{msg}\n```')
+            embed.set_footer(icon_url=ctx.author.avatar_url)
+            return await ctx.send(embed=embed)
+
         if not self.is_evaluatable_message(body):
             return
 
         blocked_words = ['os', 'sys', 'multiprocessing',
                          'env', 'subprocess', 'open', 'token']
 
+        ret_code = 2
         for x in blocked_words:
             if x.lower() in body.lower():
-                embed = Embed(color=Color.red())
-                embed.add_field(
-                    name="Error", value=f'```\nYour code contains certain blocked words.\n```')
-                embed.set_footer(icon_url=ctx.author.avatar_url)
-                return await ctx.send(embed=embed)
-
-        body = self.cleanup_code(body)
-        embed = Embed(color=Color(0xffffcc))
-
-        time_start = time.time()
-        ret_code, value = await self.eval_coro(body)
-        time_end = time.time()
-
-        elapsed_time = time.strftime(
-            "%H:%M:%S", time.gmtime(time_end - time_start))
-
-        out = err = None
-        if ret_code == 0:
-            dots = "..." if len(value) > 1000 else ""
-            embed.add_field(
-                name="Output",
-                value=f'```py\n{value[:1000]}{dots}\n```')
-            embed.set_footer(
-                text=f"Finished in: {elapsed_time}",
-                icon_url=ctx.author.avatar_url)
-
-            out = await ctx.send(embed=embed)
+                await show_error("your code contains blocked words")
+                ret_code = 1
+                break
 
         else:
-            embed.color = Color.red()
-            embed.add_field(
-                name="Error",
-                value=f'```\n{value}\n```')
-            embed.set_footer(
-                text=f"Finished in: {elapsed_time}",
-                icon_url=ctx.author.avatar_url)
+            body = self.cleanup_code(body)
 
-            err = await ctx.send(embed=embed)
+            ret_code, value = await self.eval_coro(body)
 
-        if out:
+            if ret_code == 0:
+                await show_success(value)
+            else:
+                await show_error(value)
+
+        if ret_code == 0:
             await ctx.message.add_reaction('\u2705')  # tick
-        elif err:
+        elif ret_code == 1:
             await ctx.message.add_reaction('\u2049')  # x
         else:
             await ctx.message.add_reaction('\u2705')
 
-        await ctx.message.remove_reaction("▶", ctx.author)
-        await ctx.message.remove_reaction("▶", self.bot.user)
+        await ctx.message.clear_reaction("▶")
 
     def cleanup_code(self, content):
         """Automatically removes code blocks from the code."""
