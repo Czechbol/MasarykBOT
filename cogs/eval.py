@@ -8,6 +8,7 @@ from astpretty import pprint
 import re
 
 import multiprocessing
+import os
 
 
 class EvalError(Exception):
@@ -37,7 +38,7 @@ class Evaluator:
         self.allowed_builtins["print"] = self.print
 
         import tempfile
-        self.filename = tempfile.NamedTemporaryFile().name
+        self.filename = tempfile.NamedTemporaryFile(delete=False).name
 
     def print(self, *args, sep=" ", end="\n", file=None, flush=None):
         with open(self.filename, "a") as f:
@@ -45,10 +46,16 @@ class Evaluator:
             f.flush()
 
     class Transformer(ast.NodeTransformer):
+        def check_illegal(self, text):
+            if re.match("__([^_]+)__", text):
+                raise EvalError("unsuported __name__")
+            if re.match("_([^_]+)", text):
+                raise EvalError("unsuported _name")
+
         def visit_Import(self, node):
             for name in map(lambda imp: imp.name, node.names):
                 if name not in Evaluator.allowed_imports:
-                    raise EvalError("unsuported import")
+                    self.check_illegal(name)
             return node
 
         def visit_ImportFrom(self, node):
@@ -56,56 +63,76 @@ class Evaluator:
                 raise EvalError("unsuported import")
             for alias in node.names:
                 for name in [alias.name, alias.asname]:
-                    if re.match("__([^_]+)__", name):
-                        raise EvalError("unsuported __name__ import")
-                    if re.match("_([^_]+)", name):
-                        raise EvalError("unsuported _name import")
+                    self.check_illegal(name)
+
             return node
 
         def visit_Attribute(self, node):
-            if re.match("__([^_]+)__", node.attr):
-                raise EvalError("unsuported __name__ attributes")
-            if re.match("_([^_]+)", node.attr):
-                raise EvalError("unsuported _name attributes")
+            self.check_illegal(node.attr)
             return node
 
         def visit_Name(self, node):
-            if re.match("__([^_]+)__", node.id):
-                raise EvalError("unsuported __name__ attributes")
-            if re.match("_([^_]+)", node.id):
-                raise EvalError("unsuported _name attributes")
+            self.check_illegal(node.id)
             return node
 
         def visit_Str(self, node):
-            if re.match("__([^_]+)__", node.s):
-                raise EvalError("unsuported __name__ string")
-            if re.match("_([^_]+)", node.s):
-                raise EvalError("unsuported _name string")
+            self.check_illegal(node.s)
             return node
 
         def visit_Index(self, node):
-            print(node.value)
+            evaluator = Evaluator()
+            (retval, printval) = evaluator._eval(ast.Expression(node.value), True)
+            self.check_illegal(retval)
             return node
 
-    def _eval(self, tree, verbose=False):
+        def visit_Call(self, node):
+            for arg in node.args:
+                evaluator = Evaluator()
+                (retval, printval) = evaluator._eval(ast.Expression(arg), True)
+                self.check_illegal(retval)
+            return node
+
+    def _exec(self, tree, verbose=False):
         self.Transformer().visit(tree)
         tree = ast.fix_missing_locations(tree)
 
         if verbose:
+            print("pprinting exec")
             pprint(tree)
 
         co = compile(tree, filename="<ast>", mode="exec")
         exec(co, {'__builtins__': self.allowed_builtins}, {})
 
         with open(self.filename, "r") as f:
-            return f.read()
+            retval = None, f.read()
+        os.remove(self.filename)
 
-    def eval(self, code):
+        return retval
+
+    def _eval(self, tree, verbose=False):
+        self.Transformer().visit(tree)
+        tree = ast.fix_missing_locations(tree)
+
+        if verbose:
+            print("pprinting eval")
+            pprint(tree)
+
+        co = compile(tree, filename="<ast>", mode="eval")
+        retval = eval(co, {'__builtins__': self.allowed_builtins}, {})
+
+        with open(self.filename, "r") as f:
+            retval = retval, f.read()
+        os.remove(self.filename)
+
+        return retval
+
+    def run(self, code, verbose=False):
         with multiprocessing.Pool(processes=1) as pool:
             try:
                 tree = ast.parse(code)
-                result = pool.apply_async(self._eval, [tree, True])
-                return 0, result.get(timeout=5)
+                result = pool.apply_async(self._exec, [tree, verbose])
+                (retval, printval) = result.get(timeout=5)
+                return 0, printval
 
             except EvalError as e:
                 return 1, str(e)
@@ -124,7 +151,7 @@ class Eval(commands.Cog):
 
     async def eval_coro(self, code):
         evaluator = Evaluator()
-        return evaluator.eval(code)
+        return evaluator.run(code)
 
     @commands.command(name='eval')
     async def _eval(self, ctx, *, body):
@@ -144,7 +171,7 @@ class Eval(commands.Cog):
         if not self.is_evaluatable_message(body):
             return
 
-        blocked_words = ['os', 'multiprocessing',
+        blocked_words = ['os', 'sys', 'multiprocessing',
                          'env', 'subprocess', 'open', 'token']
 
         for x in blocked_words:
