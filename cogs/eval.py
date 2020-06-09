@@ -34,11 +34,14 @@ class Evaluator:
         '__import__': __import__
     }
 
-    def __init__(self):
+    def __init__(self, filename=None):
         self.allowed_builtins["print"] = self.print
 
-        import tempfile
-        self.filename = tempfile.NamedTemporaryFile(delete=False).name
+        if filename is None:
+            import tempfile
+            self.filename = tempfile.NamedTemporaryFile(delete=False).name
+        else:
+            self.filename = filename
 
     def print(self, *args, sep=" ", end="\n", file=None, flush=None):
         with open(self.filename, "a") as f:
@@ -46,6 +49,10 @@ class Evaluator:
             f.flush()
 
     class Transformer(ast.NodeTransformer):
+        def __init__(self, evaluator):
+            self.evaluator = evaluator
+            print(type(self.evaluator), self.evaluator)
+
         def check_illegal(self, text):
             if re.match("__([^_]+)__", text):
                 raise EvalError("unsuported __name__")
@@ -80,41 +87,21 @@ class Evaluator:
             return node
 
         def visit_Index(self, node):
-            evaluator = Evaluator()
-            (retval, printval) = evaluator._eval(ast.Expression(node.value), True)
+            (retval, printval) = self.evaluator._eval(ast.Expression(node.value))
             self.check_illegal(retval)
             return node
 
         def visit_Call(self, node):
             for arg in node.args:
-                evaluator = Evaluator()
-                (retval, printval) = evaluator._eval(ast.Expression(arg), True)
+                (retval, printval) = self.evaluator._eval(ast.Expression(arg))
                 self.check_illegal(retval)
             return node
 
-    def _exec(self, tree, verbose=False):
-        self.Transformer().visit(tree)
-        tree = ast.fix_missing_locations(tree)
-
-        if verbose:
-            print("pprinting exec")
-            pprint(tree)
-
-        co = compile(tree, filename="<ast>", mode="exec")
-        exec(co, {'__builtins__': self.allowed_builtins}, {})
-
-        with open(self.filename, "r") as f:
-            retval = None, f.read()
-        os.remove(self.filename)
-
-        return retval
-
     def _eval(self, tree, verbose=False):
-        self.Transformer().visit(tree)
+        self.Transformer(self).visit(tree)
         tree = ast.fix_missing_locations(tree)
 
         if verbose:
-            print("pprinting eval")
             pprint(tree)
 
         co = compile(tree, filename="<ast>", mode="eval")
@@ -122,6 +109,22 @@ class Evaluator:
 
         with open(self.filename, "r") as f:
             retval = retval, f.read()
+        os.remove(self.filename)
+
+        return retval
+
+    def _exec(self, tree, verbose=False):
+        self.Transformer(self).visit(tree)
+        tree = ast.fix_missing_locations(tree)
+
+        if verbose:
+            pprint(tree)
+
+        co = compile(tree, filename="<ast>", mode="exec")
+        exec(co, {'__builtins__': self.allowed_builtins}, {})
+
+        with open(self.filename, "r") as f:
+            retval = None, f.read()
         os.remove(self.filename)
 
         return retval
