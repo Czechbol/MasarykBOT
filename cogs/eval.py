@@ -87,14 +87,20 @@ class Evaluator:
             return node
 
         def visit_Index(self, node):
-            (retval, printval) = self.evaluator._eval(ast.Expression(node.value))
-            self.check_illegal(retval)
+            try:
+                (retval, printval) = self.evaluator._eval(ast.Expression(node.value))
+                self.check_illegal(retval)
+            except Exception:
+                pass
             return node
 
         def visit_Call(self, node):
             for arg in node.args:
-                (retval, printval) = self.evaluator._eval(ast.Expression(arg))
-                self.check_illegal(retval)
+                try:
+                    (retval, printval) = self.evaluator._eval(ast.Expression(arg))
+                    self.check_illegal(retval)
+                except Exception:
+                    pass
             return node
 
     def _eval(self, tree, verbose=False):
