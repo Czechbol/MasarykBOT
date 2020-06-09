@@ -83,10 +83,11 @@ class Evaluator:
                 raise EvalError("unsuported _name string")
             return node
 
-    def eval(self, code, verbose=False):
-        tree = ast.parse(code)
+        def visit_Index(self, node):
+            print(node.value)
+            return node
 
-        # make source safer
+    def _eval(self, tree, verbose=False):
         self.Transformer().visit(tree)
         tree = ast.fix_missing_locations(tree)
 
@@ -99,18 +100,11 @@ class Evaluator:
         with open(self.filename, "r") as f:
             return f.read()
 
-
-class Eval(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        self.log = logging.getLogger(__name__)
-
-    async def eval_coro(self, code):
-        evaluator = Evaluator()
-
+    def eval(self, code):
         with multiprocessing.Pool(processes=1) as pool:
             try:
-                result = pool.apply_async(evaluator.eval, [code, True])
+                tree = ast.parse(code)
+                result = pool.apply_async(self._eval, [tree, True])
                 return 0, result.get(timeout=5)
 
             except EvalError as e:
@@ -121,6 +115,16 @@ class Eval(commands.Cog):
 
             except Exception as e:
                 return 1, str(e)
+
+
+class Eval(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.log = logging.getLogger(__name__)
+
+    async def eval_coro(self, code):
+        evaluator = Evaluator()
+        return evaluator.eval(code)
 
     @commands.command(name='eval')
     async def _eval(self, ctx, *, body):
@@ -140,8 +144,8 @@ class Eval(commands.Cog):
         if not self.is_evaluatable_message(body):
             return
 
-        blocked_words = ['delete', 'os', 'env', 'subprocess', 'open',
-                         'history()', 'token']
+        blocked_words = ['os', 'multiprocessing',
+                         'env', 'subprocess', 'open', 'token']
 
         for x in blocked_words:
             if x.lower() in body.lower():
